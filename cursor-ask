@@ -24,96 +24,104 @@ args=(--mode ask --print --output-format stream-json --stream-partial-output --m
 cursor agent "${args[@]}" "$*" 2>/dev/null \
   | python3 -c '
 import sys, json
-
-DIM = "\033[2m"
-RESET = "\033[0m"
-CYAN = "\033[36m"
-YELLOW = "\033[33m"
+from rich.console import Console, Group
+from rich.live import Live
+from rich.markdown import Markdown
+from rich.text import Text
 
 in_thinking = False
+accumulated_text = ""
+thinking_text = ""
+header_lines = []
 
-for line in sys.stdin:
-    line = line.strip()
-    if not line:
-        continue
-    try:
-        obj = json.loads(line)
-    except json.JSONDecodeError:
-        continue
+console = Console()
 
-    t = obj.get("type")
+def build_renderable():
+    parts = [Text.from_ansi(h) if "\033[" in h else Text(h) for h in header_lines]
+    if accumulated_text:
+        parts.append(Markdown(accumulated_text))
+    if not parts:
+        parts.append(Text(""))
+    return Group(*parts)
 
-    if t == "system" and obj.get("subtype") == "init":
-        model_name = obj.get("model", "unknown")
-        sys.stderr.write(f"{DIM}[model] {model_name}{RESET}\n")
-        sys.stderr.flush()
-
-    elif t == "thinking":
-        sub = obj.get("subtype")
-        if sub == "delta":
-            if not in_thinking:
-                sys.stderr.write(f"{DIM}[thinking] ")
-                in_thinking = True
-            sys.stderr.write(obj.get("text", ""))
-            sys.stderr.flush()
-        elif sub == "completed":
-            if in_thinking:
-                sys.stderr.write(f"{RESET}\n")
-                sys.stderr.flush()
-                in_thinking = False
-
-    elif t == "assistant":
-        if obj.get("model_call_id"):
+with Live(build_renderable(), console=console, refresh_per_second=12, vertical_overflow="visible", transient=False) as live:
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
             continue
-        if "timestamp_ms" in obj:
-            content = obj.get("message", {}).get("content", [])
-            for block in content:
-                if block.get("type") == "text":
-                    sys.stdout.write(block["text"])
-                    sys.stdout.flush()
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
 
-    elif t == "tool_call":
-        sub = obj.get("subtype")
-        tc = obj.get("tool_call", {})
-        if sub == "started":
-            tool_name = ""
-            tool_key = ""
-            for key in tc:
-                if key.endswith("ToolCall"):
-                    tool_key = key
-                    tool_name = key.replace("ToolCall", "")
-                    break
-            args_obj = tc.get(tool_key, {}).get("args", {}) if tool_key else {}
-            desc = args_obj.get("description", "") or tc.get("description", "")
-            detail = ""
-            if tool_name == "grep":
-                p = args_obj.get("pattern", "")
-                path = args_obj.get("path", "")
-                detail = f"\"{p}\" in {path}"
-            elif tool_name == "shell":
-                detail = args_obj.get("command", "")
-            elif tool_name == "glob":
-                detail = args_obj.get("pattern", "") or args_obj.get("glob", "")
-            elif tool_name == "read":
-                detail = args_obj.get("filePath", "") or args_obj.get("path", "")
-            elif tool_name == "write":
-                detail = args_obj.get("filePath", "") or args_obj.get("path", "")
-            elif tool_name == "edit":
-                detail = args_obj.get("filePath", "") or args_obj.get("path", "")
-            else:
-                detail = desc
-                desc = ""
+        t = obj.get("type")
 
-            line1 = f"[{tool_name}]"
-            if desc:
-                line1 += f" {desc}"
-            sys.stderr.write(f"{CYAN}{line1}{RESET}\n")
-            if detail:
-                sys.stderr.write(f"{DIM}        > {detail}{RESET}\n")
-            sys.stderr.flush()
+        if t == "system" and obj.get("subtype") == "init":
+            model_name = obj.get("model", "unknown")
+            header_lines.append(f"\033[2m[model] {model_name}\033[0m")
+            live.update(build_renderable())
 
-    elif t == "result":
-        pass
+        elif t == "thinking":
+            sub = obj.get("subtype")
+            if sub == "delta":
+                if not in_thinking:
+                    in_thinking = True
+                    thinking_text = ""
+                thinking_text += obj.get("text", "")
+            elif sub == "completed":
+                if in_thinking:
+                    header_lines.append(f"\033[2m[thinking] {thinking_text}\033[0m")
+                    live.update(build_renderable())
+                    in_thinking = False
+                    thinking_text = ""
 
-print()
+        elif t == "assistant":
+            if obj.get("model_call_id"):
+                continue
+            if "timestamp_ms" in obj:
+                content = obj.get("message", {}).get("content", [])
+                for block in content:
+                    if block.get("type") == "text":
+                        accumulated_text += block["text"]
+                live.update(build_renderable())
+
+        elif t == "tool_call":
+            sub = obj.get("subtype")
+            tc = obj.get("tool_call", {})
+            if sub == "started":
+                tool_name = ""
+                tool_key = ""
+                for key in tc:
+                    if key.endswith("ToolCall"):
+                        tool_key = key
+                        tool_name = key.replace("ToolCall", "")
+                        break
+                args_obj = tc.get(tool_key, {}).get("args", {}) if tool_key else {}
+                desc = args_obj.get("description", "") or tc.get("description", "")
+                detail = ""
+                if tool_name == "grep":
+                    p = args_obj.get("pattern", "")
+                    path = args_obj.get("path", "")
+                    detail = f"\"{p}\" in {path}"
+                elif tool_name == "shell":
+                    detail = args_obj.get("command", "")
+                elif tool_name == "glob":
+                    detail = args_obj.get("pattern", "") or args_obj.get("glob", "")
+                elif tool_name == "read":
+                    detail = args_obj.get("filePath", "") or args_obj.get("path", "")
+                elif tool_name == "write":
+                    detail = args_obj.get("filePath", "") or args_obj.get("path", "")
+                elif tool_name == "edit":
+                    detail = args_obj.get("filePath", "") or args_obj.get("path", "")
+                else:
+                    detail = desc
+                    desc = ""
+
+                line1 = f"[{tool_name}]"
+                if desc:
+                    line1 += f" {desc}"
+                header_lines.append(f"\033[36m{line1}\033[0m")
+                if detail:
+                    header_lines.append(f"\033[2m        > {detail}\033[0m")
+                live.update(build_renderable())
 '
