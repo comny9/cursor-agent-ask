@@ -4,7 +4,7 @@ set -euo pipefail
 REPO_URL="https://github.com/comny9/cursor-agent-ask.git"
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/cursor-agent-ask"
 BIN_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
-SCRIPT_NAME="${SCRIPT_NAME:-cursor-agent-ask}"
+SCRIPT_NAME="${SCRIPT_NAME:-ask}"
 LINK="${BIN_DIR}/${SCRIPT_NAME}"
 
 existing=$(command -v "$SCRIPT_NAME" 2>/dev/null || true)

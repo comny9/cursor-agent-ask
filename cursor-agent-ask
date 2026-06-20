@@ -32,7 +32,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [ $# -eq 0 ]; then
-  echo "Usage: cursor-agent-ask [-m|--model <model>] [--plain] [--update] <prompt>" >&2
+  echo "Usage: ask [-m|--model <model>] [--plain] [--update] <prompt>" >&2
   exit 1
 fi
 
